@@ -53,25 +53,92 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   return NextResponse.json({ ...event, scores: scores || [] });
 }
 
-// イベント更新
+// イベント更新（参加者・組み合わせ含む）
 export async function PUT(req: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params;
-    const { name, event_date, course_id, status } = await req.json();
+    const { name, event_date, course_id, status, participants, groups } = await req.json();
 
+    // 基本情報の更新
     const updates: Record<string, string> = {};
     if (name) updates.name = name;
     if (event_date) updates.event_date = event_date;
     if (course_id) updates.course_id = course_id;
     if (status) updates.status = status;
 
-    const { error } = await supabase
-      .from('events')
-      .update(updates)
-      .eq('id', id);
+    if (Object.keys(updates).length > 0) {
+      const { error } = await supabase
+        .from('events')
+        .update(updates)
+        .eq('id', id);
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+    }
+
+    // 参加者の更新（指定された場合）
+    if (participants) {
+      // 既存の参加者を削除して再登録
+      await supabase.from('event_participants').delete().eq('event_id', id);
+
+      if (participants.length > 0) {
+        const participantRecords = participants.map((userId: string) => ({
+          event_id: id,
+          user_id: userId,
+        }));
+        const { error: partError } = await supabase
+          .from('event_participants')
+          .insert(participantRecords);
+        if (partError) {
+          return NextResponse.json({ error: partError.message }, { status: 500 });
+        }
+      }
+    }
+
+    // 組み合わせの更新（指定された場合）
+    if (groups) {
+      // 既存の組を取得して削除
+      const { data: existingGroups } = await supabase
+        .from('event_groups')
+        .select('id')
+        .eq('event_id', id);
+
+      if (existingGroups && existingGroups.length > 0) {
+        const groupIds = existingGroups.map((g: { id: string }) => g.id);
+        await supabase.from('group_members').delete().in('group_id', groupIds);
+        await supabase.from('event_groups').delete().eq('event_id', id);
+      }
+
+      // 新しい組を登録
+      for (const group of groups) {
+        const { data: groupData, error: groupError } = await supabase
+          .from('event_groups')
+          .insert({
+            event_id: id,
+            group_number: group.group_number,
+            start_time: group.start_time,
+          })
+          .select('id')
+          .single();
+
+        if (groupError) {
+          return NextResponse.json({ error: groupError.message }, { status: 500 });
+        }
+
+        if (group.members && group.members.length > 0) {
+          const memberRecords = group.members.map((userId: string) => ({
+            group_id: groupData.id,
+            user_id: userId,
+          }));
+          const { error: memberError } = await supabase
+            .from('group_members')
+            .insert(memberRecords);
+          if (memberError) {
+            return NextResponse.json({ error: memberError.message }, { status: 500 });
+          }
+        }
+      }
     }
 
     return NextResponse.json({ success: true });

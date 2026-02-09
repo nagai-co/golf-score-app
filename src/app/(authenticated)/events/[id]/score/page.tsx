@@ -1,8 +1,9 @@
 'use client';
 
 import { useAuth } from '@/lib/auth-context';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import Link from 'next/link';
 
 type CourseHole = { hole_number: number; par: number };
 type GroupMember = { user_id: string; users: { id: string; name: string } };
@@ -34,7 +35,6 @@ const PENDING_KEY = (eventId: string) => `golf-pending-${eventId}`;
 export default function ScoreInputPage() {
   const { user } = useAuth();
   const params = useParams();
-  const router = useRouter();
   const eventId = params.id as string;
 
   const [event, setEvent] = useState<EventInfo | null>(null);
@@ -47,6 +47,8 @@ export default function ScoreInputPage() {
 
   const prevUserRef = useRef<string>('');
   const prevHoleRef = useRef<number>(1);
+  const [showFooter, setShowFooter] = useState(false);
+  const footerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // スコアのキー
   const scoreKey = (userId: string, holeNumber: number) => `${userId}-${holeNumber}`;
@@ -137,6 +139,24 @@ export default function ScoreInputPage() {
       );
     }
   }, [selectedUserId, currentHole, eventId]);
+
+  // フッター表示制御（スクロール/タッチ時に表示、一定時間後に非表示）
+  useEffect(() => {
+    const showFooterTemporarily = () => {
+      setShowFooter(true);
+      if (footerTimerRef.current) clearTimeout(footerTimerRef.current);
+      footerTimerRef.current = setTimeout(() => setShowFooter(false), 3000);
+    };
+
+    window.addEventListener('scroll', showFooterTemporarily, { passive: true });
+    window.addEventListener('touchmove', showFooterTemporarily, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', showFooterTemporarily);
+      window.removeEventListener('touchmove', showFooterTemporarily);
+      if (footerTimerRef.current) clearTimeout(footerTimerRef.current);
+    };
+  }, []);
 
   // オンライン状態監視
   useEffect(() => {
@@ -261,12 +281,13 @@ export default function ScoreInputPage() {
   const updateScore = (field: 'strokes' | 'putts', delta: number) => {
     if (!selectedUserId) return;
     const key = scoreKey(selectedUserId, currentHole);
+    const holePar = event?.courses?.course_holes?.find((h) => h.hole_number === currentHole)?.par || 4;
     const current = scores[key] || {
       event_id: eventId,
       user_id: selectedUserId,
       hole_number: currentHole,
-      strokes: 0,
-      putts: 0,
+      strokes: holePar,
+      putts: 2,
     };
 
     let newVal = (current[field] || 0) + delta;
@@ -299,8 +320,8 @@ export default function ScoreInputPage() {
   const currentPar = holes.find((h) => h.hole_number === currentHole)?.par || 4;
   const groupMembers = getGroupMembers();
   const currentScore = scores[scoreKey(selectedUserId, currentHole)] || {
-    strokes: 0,
-    putts: 0,
+    strokes: currentPar,
+    putts: 2,
   };
 
   // パーとの差分表示
@@ -319,31 +340,19 @@ export default function ScoreInputPage() {
   const diff = currentScore.strokes > 0 ? currentScore.strokes - currentPar : 0;
 
   return (
-    <div className="h-[100dvh] flex flex-col bg-gray-50 overflow-hidden select-none">
-      {/* ステータスバー */}
-      <div className="flex items-center justify-between px-3 py-1 bg-[#166534] text-white text-xs">
-        <button onClick={() => router.push(`/events/${eventId}`)} className="text-white py-1">
-          ← 戻る
-        </button>
-        <span>{event.name}</span>
-        <div className="flex items-center gap-1">
-          {saving && <span className="text-yellow-300">保存中</span>}
-          {!isOnline && <span className="text-red-300">オフライン</span>}
-        </div>
-      </div>
-
+    <div className="min-h-[100dvh] flex flex-col bg-gray-50 select-none">
       {/* 1. メンバー選択（2行×2列） */}
-      <div className="grid grid-cols-2 gap-[2px] p-1 bg-white">
+      <div className="grid grid-cols-2 gap-[1px] bg-gray-200">
         {groupMembers.slice(0, 4).map((p) => (
           <button
             key={p.user_id}
             onClick={() => handleMemberSwitch(p.user_id)}
-            className={`py-3 rounded-md font-bold transition-colors ${
+            className={`py-5 font-bold transition-colors ${
               selectedUserId === p.user_id
                 ? 'bg-[#166534] text-white'
-                : 'bg-gray-100 text-gray-700'
+                : 'bg-gray-100 text-gray-500'
             }`}
-            style={{ fontSize: 'min(22px, 5vw)' }}
+            style={{ fontSize: 'min(28px, 6.5vw)' }}
           >
             {p.users.name}
           </button>
@@ -352,69 +361,63 @@ export default function ScoreInputPage() {
 
       {/* 2. 打数エリア */}
       <div className="flex-1 flex flex-col justify-center items-center bg-green-50 px-4">
-        <div className="flex items-center justify-between w-full mb-1">
-          <span className="text-sm font-bold text-gray-600">打数</span>
-          {diffLabel && (
-            <span
-              className={`text-sm font-bold ${
-                diff > 0 ? 'text-red-600' : diff < 0 ? 'text-blue-600' : 'text-gray-600'
-              }`}
-            >
-              {diffLabel}
-            </span>
-          )}
-        </div>
+        <span className="text-sm font-bold text-gray-600 mb-2">打数</span>
         <div className="flex items-center justify-center gap-6 w-full">
           <button
             onClick={() => updateScore('strokes', -1)}
-            className="w-[min(64px,16vw)] h-[min(64px,16vw)] rounded-full bg-white border-2 border-gray-300 flex items-center justify-center active:bg-gray-100"
+            className="w-[min(64px,16vw)] h-[min(64px,16vw)] rounded-full border-2 border-gray-300 bg-white flex items-center justify-center active:bg-gray-100"
           >
-            <span className="text-[min(62px,15vw)] leading-none text-gray-600 font-light" style={{ marginTop: '-4px' }}>
+            <span className="text-[min(32px,8vw)] leading-none text-gray-500">
               −
             </span>
           </button>
           <span
             className="font-bold text-gray-900 min-w-[80px] text-center"
-            style={{ fontSize: 'min(64px, 16vw)' }}
+            style={{ fontSize: 'min(80px, 20vw)' }}
           >
-            {currentScore.strokes || '-'}
+            {currentScore.strokes}
           </span>
           <button
             onClick={() => updateScore('strokes', 1)}
-            className="w-[min(64px,16vw)] h-[min(64px,16vw)] rounded-full bg-white border-2 border-gray-300 flex items-center justify-center active:bg-gray-100"
+            className="w-[min(72px,18vw)] h-[min(72px,18vw)] rounded-full bg-[#166534] flex items-center justify-center active:bg-[#14532d]"
           >
-            <span className="text-[min(62px,15vw)] leading-none text-gray-600 font-light" style={{ marginTop: '-4px' }}>
+            <span className="text-[min(36px,9vw)] leading-none text-white font-bold">
               +
             </span>
           </button>
         </div>
+        <span
+          className={`text-sm font-bold mt-1 min-h-[20px] ${
+            diff > 0 ? 'text-red-600' : diff < 0 ? 'text-blue-600' : 'text-green-700'
+          }`}
+        >
+          {diffLabel ? (diff !== 0 ? `${diff > 0 ? '+' : ''}${diff} ${diffLabel}` : diffLabel) : ''}
+        </span>
       </div>
 
       {/* 3. パットエリア */}
-      <div className="flex-1 flex flex-col justify-center items-center bg-gray-100 px-4">
-        <div className="w-full mb-1">
-          <span className="text-sm font-bold text-gray-600">パット</span>
-        </div>
+      <div className="flex-1 flex flex-col justify-center items-center bg-white px-4">
+        <span className="text-sm font-bold text-gray-600 mb-2">パット</span>
         <div className="flex items-center justify-center gap-6 w-full">
           <button
             onClick={() => updateScore('putts', -1)}
-            className="w-[min(64px,16vw)] h-[min(64px,16vw)] rounded-full bg-white border-2 border-gray-300 flex items-center justify-center active:bg-gray-100"
+            className="w-[min(64px,16vw)] h-[min(64px,16vw)] rounded-full border-2 border-gray-300 bg-white flex items-center justify-center active:bg-gray-100"
           >
-            <span className="text-[min(62px,15vw)] leading-none text-gray-600 font-light" style={{ marginTop: '-4px' }}>
+            <span className="text-[min(32px,8vw)] leading-none text-gray-500">
               −
             </span>
           </button>
           <span
             className="font-bold text-gray-900 min-w-[80px] text-center"
-            style={{ fontSize: 'min(64px, 16vw)' }}
+            style={{ fontSize: 'min(80px, 20vw)' }}
           >
-            {currentScore.putts || '-'}
+            {currentScore.putts}
           </span>
           <button
             onClick={() => updateScore('putts', 1)}
-            className="w-[min(64px,16vw)] h-[min(64px,16vw)] rounded-full bg-white border-2 border-gray-300 flex items-center justify-center active:bg-gray-100"
+            className="w-[min(72px,18vw)] h-[min(72px,18vw)] rounded-full bg-gray-600 flex items-center justify-center active:bg-gray-700"
           >
-            <span className="text-[min(62px,15vw)] leading-none text-gray-600 font-light" style={{ marginTop: '-4px' }}>
+            <span className="text-[min(36px,9vw)] leading-none text-white font-bold">
               +
             </span>
           </button>
@@ -426,16 +429,16 @@ export default function ScoreInputPage() {
         <button
           onClick={() => handleHoleChange(currentHole - 1)}
           disabled={currentHole <= 1}
-          className="w-[56px] h-[56px] rounded-xl bg-gray-100 flex items-center justify-center disabled:opacity-30 active:bg-gray-200"
+          className="w-[48px] h-[48px] rounded bg-[#166534] flex items-center justify-center disabled:opacity-30 active:bg-[#14532d]"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-gray-700">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7 text-white">
             <path fillRule="evenodd" d="M7.72 12.53a.75.75 0 010-1.06l7.5-7.5a.75.75 0 111.06 1.06L9.31 12l6.97 6.97a.75.75 0 11-1.06 1.06l-7.5-7.5z" clipRule="evenodd" />
           </svg>
         </button>
 
         <div className="text-center">
           <span className="font-bold text-gray-900" style={{ fontSize: 'min(56px, 14vw)' }}>
-            {currentHole}
+            {currentHole}<span className="text-[0.4em]">H</span>
           </span>
           <span className="text-sm text-gray-500 block -mt-1">
             PAR {currentPar}
@@ -445,13 +448,32 @@ export default function ScoreInputPage() {
         <button
           onClick={() => handleHoleChange(currentHole + 1)}
           disabled={currentHole >= 18}
-          className="w-[56px] h-[56px] rounded-xl bg-gray-100 flex items-center justify-center disabled:opacity-30 active:bg-gray-200"
+          className="w-[48px] h-[48px] rounded bg-[#166534] flex items-center justify-center disabled:opacity-30 active:bg-[#14532d]"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8 text-gray-700">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-7 h-7 text-white">
             <path fillRule="evenodd" d="M16.28 11.47a.75.75 0 010 1.06l-7.5 7.5a.75.75 0 01-1.06-1.06L14.69 12 7.72 5.03a.75.75 0 011.06-1.06l7.5 7.5z" clipRule="evenodd" />
           </svg>
         </button>
       </div>
+
+      {/* 5. フッターナビ（スクロール時のみ表示） */}
+      <nav className={`bg-[#166534] flex justify-around items-center h-14 fixed bottom-0 left-0 right-0 transition-transform duration-300 ${showFooter ? 'translate-y-0' : 'translate-y-full'}`}>
+        <Link href="/home" className="flex items-center justify-center w-full h-full text-white opacity-60">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-7 h-7">
+            <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+          </svg>
+        </Link>
+        <Link href="/events" className="flex items-center justify-center w-full h-full text-white opacity-100">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-7 h-7">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+          </svg>
+        </Link>
+        <Link href="/annual" className="flex items-center justify-center w-full h-full text-white opacity-60">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-7 h-7">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
+          </svg>
+        </Link>
+      </nav>
     </div>
   );
 }

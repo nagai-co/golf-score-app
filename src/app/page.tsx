@@ -17,12 +17,26 @@ export default function LoginPage() {
     setError('');
     setIsLoading(true);
 
-    const success = await login(name, password);
-
-    if (success) {
-      router.push('/home');
-    } else {
-      setError('名前またはパスワードが正しくありません');
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'ログインに失敗しました');
+        setIsLoading(false);
+        return;
+      }
+      const success = await login(name, password);
+      if (success) {
+        router.push('/home');
+      } else {
+        setError('ログイン処理に失敗しました');
+      }
+    } catch (err) {
+      setError(`接続エラー: ${err}`);
     }
 
     setIsLoading(false);
