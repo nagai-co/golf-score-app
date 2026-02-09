@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuth } from '@/lib/auth-context';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useEffect } from 'react';
 import { FooterNav } from '@/components/footer-nav';
 
@@ -12,6 +12,11 @@ export default function AuthenticatedLayout({
 }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+
+  // フッターナビゲーションを表示するパス
+  const showFooterPaths = ['/home', '/events', '/annual'];
+  const shouldShowFooter = showFooterPaths.some(path => pathname === path || pathname.startsWith(path + '/'));
 
   useEffect(() => {
     if (!loading && !user) {
@@ -30,9 +35,9 @@ export default function AuthenticatedLayout({
   if (!user) return null;
 
   return (
-    <div className="min-h-screen pb-14">
+    <div className={shouldShowFooter ? "min-h-screen pb-14" : "min-h-screen"}>
       {children}
-      <FooterNav />
+      {shouldShowFooter && <FooterNav />}
     </div>
   );
 }

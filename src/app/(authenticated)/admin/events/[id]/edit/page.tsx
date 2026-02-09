@@ -152,6 +152,27 @@ export default function EditEventPage() {
     router.push(`/events/${eventId}`);
   };
 
+  const handleDelete = async () => {
+    if (!confirm(`「${eventName}」を削除してもよろしいですか？\nこの操作は取り消せません。`)) {
+      return;
+    }
+
+    setSubmitting(true);
+
+    const res = await fetch(`/api/events/${eventId}`, {
+      method: 'DELETE',
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error || '削除に失敗しました');
+      setSubmitting(false);
+      return;
+    }
+
+    router.push('/events');
+  };
+
   if (user?.role !== 'admin') return null;
 
   if (loading) {
@@ -325,6 +346,16 @@ export default function EditEventPage() {
             {submitting ? '更新中...' : 'イベントを更新'}
           </button>
         </form>
+
+        {/* 削除ボタン */}
+        <button
+          type="button"
+          onClick={handleDelete}
+          disabled={submitting}
+          className="w-full bg-red-600 text-white py-3 rounded-lg font-bold text-base disabled:opacity-50 mt-4 hover:bg-red-700 active:bg-red-700"
+        >
+          イベントを削除
+        </button>
       </main>
     </div>
   );
