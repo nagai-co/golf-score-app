@@ -1,6 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
+// イベント結果の型定義
+type EventResultItem = {
+  player_id: string;
+  gross_score: number;
+  net_score: number;
+  handicap_before: number;
+  rank?: number;
+  points?: number;
+  handicap_after?: number;
+  under_par_strokes?: number;
+};
+
 // ポイントテーブル
 const POINTS_TABLE: Record<string, Record<number, number>> = {
   regular: { 1: 16, 2: 8, 3: 4, 4: 2, 5: 1 },
@@ -87,7 +99,7 @@ export async function POST(
     }
 
     // 各参加者のスコアとハンデを計算
-    const results = [];
+    const results: EventResultItem[] = [];
     for (const participant of participants) {
       const playerId = participant.player_id;
 
