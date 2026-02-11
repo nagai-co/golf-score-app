@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 
-// スコア取得（イベント＋ユーザー指定）
+// スコア取得（イベント＋プレイヤー指定）
 export async function GET(req: NextRequest) {
   const eventId = req.nextUrl.searchParams.get('event_id');
-  const userId = req.nextUrl.searchParams.get('user_id');
+  const playerId = req.nextUrl.searchParams.get('player_id');
 
   if (!eventId) {
     return NextResponse.json({ error: 'event_id is required' }, { status: 400 });
@@ -15,8 +15,8 @@ export async function GET(req: NextRequest) {
     .select('*')
     .eq('event_id', eventId);
 
-  if (userId) {
-    query = query.eq('user_id', userId);
+  if (playerId) {
+    query = query.eq('player_id', playerId);
   }
 
   const { data, error } = await query.order('hole_number');
@@ -31,11 +31,13 @@ export async function GET(req: NextRequest) {
 // スコア保存（upsert）
 export async function PUT(req: NextRequest) {
   try {
-    const { event_id, user_id, hole_number, strokes, putts, updated_by } = await req.json();
+    const { event_id, player_id, user_id, hole_number, strokes, putts } = await req.json();
 
-    if (!event_id || !user_id || !hole_number) {
+    const resolvedPlayerId = player_id || user_id;
+
+    if (!event_id || !resolvedPlayerId || !hole_number) {
       return NextResponse.json(
-        { error: 'event_id, user_id, hole_number は必須です' },
+        { error: 'event_id, player_id, hole_number は必須です' },
         { status: 400 }
       );
     }
@@ -45,14 +47,13 @@ export async function PUT(req: NextRequest) {
       .upsert(
         {
           event_id,
-          user_id,
+          player_id: resolvedPlayerId,
           hole_number,
           strokes: strokes || 0,
           putts: putts || 0,
-          updated_by: updated_by || user_id,
           updated_at: new Date().toISOString(),
         },
-        { onConflict: 'event_id,user_id,hole_number' }
+        { onConflict: 'event_id,player_id,hole_number' }
       )
       .select()
       .single();
@@ -78,24 +79,23 @@ export async function POST(req: NextRequest) {
 
     const records = scores.map((s: {
       event_id: string;
-      user_id: string;
+      player_id?: string;
+      user_id?: string;
       hole_number: number;
       strokes: number;
       putts: number;
-      updated_by?: string;
     }) => ({
       event_id: s.event_id,
-      user_id: s.user_id,
+      player_id: s.player_id || s.user_id,
       hole_number: s.hole_number,
       strokes: s.strokes || 0,
       putts: s.putts || 0,
-      updated_by: s.updated_by || s.user_id,
       updated_at: new Date().toISOString(),
     }));
 
     const { error } = await supabase
       .from('scores')
-      .upsert(records, { onConflict: 'event_id,user_id,hole_number' });
+      .upsert(records, { onConflict: 'event_id,player_id,hole_number' });
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });

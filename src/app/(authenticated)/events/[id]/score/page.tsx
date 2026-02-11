@@ -1,17 +1,15 @@
 'use client';
 
-import { useAuth } from '@/lib/auth-context';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import { useState, useEffect, useCallback, useRef } from 'react';
-import Link from 'next/link';
 
 type CourseHole = { hole_number: number; par: number };
-type GroupMember = { user_id: string; users: { id: string; name: string } };
+type GroupMember = { player_id: string; players: { id: string; name: string } };
 type EventGroup = { id: string; group_number: number; group_members: GroupMember[] };
-type Participant = { user_id: string; users: { id: string; name: string } };
+type Participant = { player_id: string; players: { id: string; name: string } };
 type ScoreData = {
   event_id: string;
-  user_id: string;
+  player_id: string;
   hole_number: number;
   strokes: number;
   putts: number;
@@ -33,9 +31,10 @@ const LAST_POS_KEY = (eventId: string) => `golf-lastpos-${eventId}`;
 const PENDING_KEY = (eventId: string) => `golf-pending-${eventId}`;
 
 export default function ScoreInputPage() {
-  const { user } = useAuth();
   const params = useParams();
+  const searchParams = useSearchParams();
   const eventId = params.id as string;
+  const groupId = searchParams.get('group');
 
   const [event, setEvent] = useState<EventInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -55,24 +54,22 @@ export default function ScoreInputPage() {
 
   // 同組メンバーの取得
   const getGroupMembers = useCallback((): Participant[] => {
-    if (!event || !user) return [];
+    if (!event) return [];
 
-    // 自分が所属する組を探す
-    const myGroup = event.event_groups.find((g) =>
-      g.group_members.some((m) => m.user_id === user.id)
-    );
-
-    if (myGroup) {
-      // 同組のメンバーのみ
-      return myGroup.group_members.map((m) => ({
-        user_id: m.user_id,
-        users: m.users,
-      }));
+    // groupIdパラメータで組を検索
+    if (groupId) {
+      const group = event.event_groups.find((g) => g.id === groupId);
+      if (group) {
+        return group.group_members.map((m) => ({
+          player_id: m.player_id,
+          players: m.players,
+        }));
+      }
     }
 
-    // 組が未設定の場合は全参加者を表示
+    // 組が未指定の場合は全参加者を表示
     return event.event_participants;
-  }, [event, user]);
+  }, [event, groupId]);
 
   // イベントデータ取得
   const fetchEvent = useCallback(async () => {
@@ -85,7 +82,7 @@ export default function ScoreInputPage() {
       // サーバーのスコアをローカルに反映
       const scoreMap: Record<string, ScoreData> = {};
       data.scores.forEach((s) => {
-        scoreMap[scoreKey(s.user_id, s.hole_number)] = s;
+        scoreMap[scoreKey(s.player_id, s.hole_number)] = s;
       });
 
       // ローカルの未送信スコアがあればマージ
@@ -93,7 +90,7 @@ export default function ScoreInputPage() {
       if (pendingRaw) {
         const pending: ScoreData[] = JSON.parse(pendingRaw);
         pending.forEach((s) => {
-          scoreMap[scoreKey(s.user_id, s.hole_number)] = s;
+          scoreMap[scoreKey(s.player_id, s.hole_number)] = s;
         });
       }
 
@@ -118,17 +115,25 @@ export default function ScoreInputPage() {
 
   // 最後の位置を復元
   useEffect(() => {
-    if (!event || !user) return;
+    if (!event) return;
+
+    const members = getGroupMembers();
+    if (members.length === 0) return;
 
     const lastPos = localStorage.getItem(LAST_POS_KEY(eventId));
     if (lastPos) {
       const { hole, userId } = JSON.parse(lastPos);
       setCurrentHole(hole);
-      setSelectedUserId(userId);
+      // 保存されたuserIdがこの組に所属しているか確認
+      if (members.some(m => m.player_id === userId)) {
+        setSelectedUserId(userId);
+      } else {
+        setSelectedUserId(members[0].player_id);
+      }
     } else {
-      setSelectedUserId(user.id);
+      setSelectedUserId(members[0].player_id);
     }
-  }, [event, user, eventId]);
+  }, [event, eventId, getGroupMembers]);
 
   // 位置を記録
   useEffect(() => {
@@ -142,7 +147,7 @@ export default function ScoreInputPage() {
 
   // 現在のホールの全メンバーにスコアがない場合、デフォルト値で初期化
   useEffect(() => {
-    if (!currentHole || !event || !user) return;
+    if (!currentHole || !event) return;
 
     const members = getGroupMembers();
     if (members.length === 0) return;
@@ -152,11 +157,11 @@ export default function ScoreInputPage() {
     const newScores = { ...scores };
 
     members.forEach((member) => {
-      const key = scoreKey(member.user_id, currentHole);
+      const key = scoreKey(member.player_id, currentHole);
       if (!scores[key]) {
         newScores[key] = {
           event_id: eventId,
-          user_id: member.user_id,
+          player_id: member.player_id,
           hole_number: currentHole,
           strokes: holePar,
           putts: 2,
@@ -170,7 +175,7 @@ export default function ScoreInputPage() {
       localStorage.setItem(STORAGE_KEY(eventId), JSON.stringify(newScores));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentHole, event, user, scores, eventId]);
+  }, [currentHole, event, scores, eventId]);
 
   // オンライン状態監視
   useEffect(() => {
@@ -223,11 +228,10 @@ export default function ScoreInputPage() {
 
       const payload = {
         event_id: eventId,
-        user_id: userId,
+        player_id: userId,
         hole_number: holeNumber,
         strokes: score.strokes,
         putts: score.putts,
-        updated_by: user?.id,
       };
 
       if (!navigator.onLine) {
@@ -235,7 +239,7 @@ export default function ScoreInputPage() {
         const pendingRaw = localStorage.getItem(PENDING_KEY(eventId));
         const pending: ScoreData[] = pendingRaw ? JSON.parse(pendingRaw) : [];
         const idx = pending.findIndex(
-          (p) => p.user_id === userId && p.hole_number === holeNumber
+          (p) => p.player_id === userId && p.hole_number === holeNumber
         );
         if (idx >= 0) {
           pending[idx] = payload;
@@ -262,7 +266,7 @@ export default function ScoreInputPage() {
       }
       setSaving(false);
     },
-    [scores, eventId, user?.id]
+    [scores, eventId]
   );
 
   // メンバー切替時・ホール移動時に自動保存
@@ -289,14 +293,14 @@ export default function ScoreInputPage() {
       if (currentHole === 9 && newHole === 10) {
         setAttestType('front');
         setShowAttest(true);
-        return; // アテスト確認後に10Hに進む
+        return;
       }
 
       // 18H終了後にアテスト画面を表示
       if (currentHole === 18 && newHole === 19) {
         setAttestType('full');
         setShowAttest(true);
-        return; // アテスト確認後に完了
+        return;
       }
 
       // 範囲チェック
@@ -312,10 +316,8 @@ export default function ScoreInputPage() {
   const handleAttestConfirm = () => {
     setShowAttest(false);
     if (attestType === 'front') {
-      // 9H終了後 → 10Hに進む
       setCurrentHole(10);
     } else if (attestType === 'full') {
-      // 18H終了 → イベント一覧に戻る
       window.location.href = '/events';
     }
     setAttestType(null);
@@ -353,7 +355,7 @@ export default function ScoreInputPage() {
     const holePar = event?.courses?.course_holes?.find((h) => h.hole_number === currentHole)?.par || 4;
     const current = scores[key] || {
       event_id: eventId,
-      user_id: selectedUserId,
+      player_id: selectedUserId,
       hole_number: currentHole,
       strokes: holePar,
       putts: 2,
@@ -393,19 +395,6 @@ export default function ScoreInputPage() {
     putts: 2,
   };
 
-  // パーとの差分表示
-  const getDiffLabel = (strokes: number, par: number): string => {
-    if (strokes === 0) return '';
-    const diff = strokes - par;
-    if (diff <= -2) return 'イーグル';
-    if (diff === -1) return 'バーディ';
-    if (diff === 0) return 'パー';
-    if (diff === 1) return 'ボギー';
-    if (diff === 2) return 'Wボギー';
-    return `+${diff}`;
-  };
-
-  const diffLabel = getDiffLabel(currentScore.strokes, currentPar);
   const diff = currentScore.strokes > 0 ? currentScore.strokes - currentPar : 0;
 
   // アテストモーダルの表示内容
@@ -425,30 +414,26 @@ export default function ScoreInputPage() {
           </div>
 
           <div className="overflow-x-auto">
-            {/* スコアテーブル */}
             <table className="w-full border-collapse">
-              {/* ヘッダー行: ホール | メンバー名（横並び） */}
               <thead>
                 <tr className="bg-gray-100">
                   <th className="border border-gray-300 px-3 py-2 text-center font-bold text-gray-900 sticky left-0 bg-gray-100 z-10">
                     ホール
                   </th>
                   {groupMembers.map((member) => (
-                    <th key={member.user_id} className="border border-gray-300 px-3 py-2 text-center font-bold text-gray-900 min-w-[100px]">
-                      {member.users.name}
+                    <th key={member.player_id} className="border border-gray-300 px-3 py-2 text-center font-bold text-gray-900 min-w-[100px]">
+                      {member.players.name}
                     </th>
                   ))}
                 </tr>
               </thead>
 
-              {/* ボディ: 各ホールを縦に並べる */}
               <tbody>
                 {displayHoles.map((h) => {
                   const holePar = holes.find((hole) => hole.hole_number === h)?.par || 4;
 
                   return (
                     <tr key={h} className="hover:bg-gray-50">
-                      {/* ホール番号セル（固定列） */}
                       <td className="border border-gray-300 px-3 py-2 text-center font-bold text-gray-900 bg-gray-50 sticky left-0 z-10">
                         <button
                           onClick={() => handleAttestEdit(h)}
@@ -461,9 +446,8 @@ export default function ScoreInputPage() {
                         </div>
                       </td>
 
-                      {/* 各メンバーのスコアセル */}
                       {groupMembers.map((member) => {
-                        const score = scores[scoreKey(member.user_id, h)];
+                        const score = scores[scoreKey(member.player_id, h)];
                         const strokeVal = score?.strokes || 0;
                         const puttVal = score?.putts || 0;
                         const diffVal = strokeVal - holePar;
@@ -471,15 +455,9 @@ export default function ScoreInputPage() {
                         let textColor = 'text-gray-900';
 
                         if (strokeVal > 0) {
-                          if (diffVal <= -2) {
+                          if (diffVal <= -1) {
                             bgColor = 'bg-blue-50';
                             textColor = 'text-blue-900';
-                          } else if (diffVal === -1) {
-                            bgColor = 'bg-blue-50';
-                            textColor = 'text-blue-800';
-                          } else if (diffVal === 0) {
-                            bgColor = 'bg-white';
-                            textColor = 'text-gray-900';
                           } else if (diffVal === 1) {
                             bgColor = 'bg-orange-50';
                             textColor = 'text-orange-900';
@@ -491,8 +469,8 @@ export default function ScoreInputPage() {
 
                         return (
                           <td
-                            key={member.user_id}
-                            onClick={() => handleAttestEdit(h, member.user_id)}
+                            key={member.player_id}
+                            onClick={() => handleAttestEdit(h, member.player_id)}
                             className={`border border-gray-300 px-3 py-2 text-center cursor-pointer ${bgColor} hover:ring-2 hover:ring-inset hover:ring-green-600`}
                           >
                             <div className={`text-2xl font-bold ${textColor}`}>
@@ -510,21 +488,20 @@ export default function ScoreInputPage() {
                   );
                 })}
 
-                {/* 合計スコア行 */}
                 <tr className="bg-green-50 font-bold">
                   <td className="border-2 border-green-700 px-3 py-3 text-center text-green-900 sticky left-0 bg-green-50 z-10">
                     合計
                   </td>
                   {groupMembers.map((member) => {
-                    const outTotal = calculateTotal(member.user_id, 1, 9);
-                    const inTotal = calculateTotal(member.user_id, 10, 18);
+                    const outTotal = calculateTotal(member.player_id, 1, 9);
+                    const inTotal = calculateTotal(member.player_id, 10, 18);
                     const fullTotal = {
                       strokes: outTotal.strokes + inTotal.strokes,
                       putts: outTotal.putts + inTotal.putts
                     };
 
                     return (
-                      <td key={member.user_id} className="border-2 border-green-700 px-3 py-3 text-center">
+                      <td key={member.player_id} className="border-2 border-green-700 px-3 py-3 text-center">
                         {!isFront && (
                           <div className="flex justify-center gap-4 mb-2 text-sm">
                             <div>
@@ -570,23 +547,22 @@ export default function ScoreInputPage() {
       <div className="grid grid-cols-2 gap-[1px] bg-gray-200">
         {groupMembers.slice(0, 4).map((p) => (
           <button
-            key={p.user_id}
-            onClick={() => handleMemberSwitch(p.user_id)}
+            key={p.player_id}
+            onClick={() => handleMemberSwitch(p.player_id)}
             className={`py-5 font-bold transition-colors ${
-              selectedUserId === p.user_id
+              selectedUserId === p.player_id
                 ? 'bg-[#166534] text-white'
                 : 'bg-gray-100 text-gray-500'
             }`}
             style={{ fontSize: 'min(28px, 6.5vw)' }}
           >
-            {p.users.name}
+            {p.players.name}
           </button>
         ))}
       </div>
 
       {/* 2. 打数エリア */}
       <div className="flex-1 flex" style={{ backgroundColor: '#F5E6B3' }}>
-        {/* マイナスエリア */}
         <button
           onClick={() => updateScore('strokes', -1)}
           className="flex-1 flex items-center justify-center border-r-2 active:opacity-80"
@@ -597,7 +573,6 @@ export default function ScoreInputPage() {
           </span>
         </button>
 
-        {/* 打数表示エリア */}
         <div className="flex-1 flex flex-col items-center justify-center" style={{ backgroundColor: '#F5E6B3' }}>
           <span className="text-sm font-bold mb-2" style={{ color: '#3A2800' }}>打数</span>
           <span
@@ -615,7 +590,6 @@ export default function ScoreInputPage() {
           </span>
         </div>
 
-        {/* プラスエリア */}
         <button
           onClick={() => updateScore('strokes', 1)}
           className="flex-1 flex items-center justify-center border-l-2 active:opacity-90"
@@ -629,7 +603,6 @@ export default function ScoreInputPage() {
 
       {/* 3. パットエリア */}
       <div className="flex-1 flex bg-green-50">
-        {/* マイナスエリア */}
         <button
           onClick={() => updateScore('putts', -1)}
           className="flex-1 flex items-center justify-center bg-white border-r-2 border-gray-200 active:bg-gray-100"
@@ -639,7 +612,6 @@ export default function ScoreInputPage() {
           </span>
         </button>
 
-        {/* パット数表示エリア */}
         <div className="flex-1 flex flex-col items-center justify-center bg-green-50">
           <span className="text-sm font-bold text-gray-600 mb-2">パット</span>
           <span
@@ -650,7 +622,6 @@ export default function ScoreInputPage() {
           </span>
         </div>
 
-        {/* プラスエリア */}
         <button
           onClick={() => updateScore('putts', 1)}
           className="flex-1 flex items-center justify-center bg-[#166534] border-l-2 border-[#14532d] active:bg-[#14532d]"

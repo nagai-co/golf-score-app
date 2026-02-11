@@ -3,14 +3,12 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
 type User = {
-  id: string;
-  name: string;
   role: 'admin' | 'player';
 };
 
 type AuthContextType = {
   user: User | null;
-  login: (name: string, password: string) => Promise<boolean>;
+  login: (pin: string) => Promise<boolean>;
   logout: () => void;
   loading: boolean;
 };
@@ -22,26 +20,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const saved = localStorage.getItem('golf-user');
+    const saved = sessionStorage.getItem('golf-user');
     if (saved) {
       setUser(JSON.parse(saved));
     }
     setLoading(false);
   }, []);
 
-  const login = async (name: string, password: string): Promise<boolean> => {
+  const login = async (pin: string): Promise<boolean> => {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, password }),
+        body: JSON.stringify({ pin }),
       });
 
       if (!res.ok) return false;
 
       const data = await res.json();
-      setUser(data.user);
-      localStorage.setItem('golf-user', JSON.stringify(data.user));
+      const u: User = { role: data.role };
+      setUser(u);
+      sessionStorage.setItem('golf-user', JSON.stringify(u));
       return true;
     } catch {
       return false;
@@ -50,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     setUser(null);
-    localStorage.removeItem('golf-user');
+    sessionStorage.removeItem('golf-user');
   };
 
   return (

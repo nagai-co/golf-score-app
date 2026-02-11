@@ -27,7 +27,7 @@ export default function NewEventPage() {
 
   const fetchData = useCallback(async () => {
     const [membersRes, coursesRes] = await Promise.all([
-      fetch('/api/admin/members'),
+      fetch(`/api/admin/players?year=${new Date().getFullYear()}`),
       fetch('/api/admin/courses'),
     ]);
     if (membersRes.ok) setMembers(await membersRes.json());
@@ -36,7 +36,7 @@ export default function NewEventPage() {
 
   useEffect(() => {
     if (user?.role !== 'admin') {
-      router.replace('/home');
+      router.replace('/admin');
       return;
     }
     fetchData();
@@ -136,7 +136,7 @@ export default function NewEventPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-[#166534] text-white px-4 py-3 flex items-center gap-3">
-        <button onClick={() => router.push('/home')} className="text-white">
+        <button onClick={() => router.push('/admin')} className="text-white">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6">
             <path fillRule="evenodd" d="M7.72 12.53a.75.75 0 010-1.06l7.5-7.5a.75.75 0 111.06 1.06L9.31 12l6.97 6.97a.75.75 0 11-1.06 1.06l-7.5-7.5z" clipRule="evenodd" />
           </svg>

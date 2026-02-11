@@ -59,7 +59,7 @@ export async function POST(
   try {
     const { id } = await params;
     const eventId = id;
-    const { userId } = await req.json(); // 確定実行者のユーザーID
+    await req.json(); // リクエストボディを消費
 
     // イベント情報取得
     const { data: event, error: eventError } = await supabase
@@ -225,7 +225,7 @@ export async function POST(
       .update({
         is_finalized: true,
         finalized_at: new Date().toISOString(),
-        finalized_by: userId,
+        finalized_by: null,
         status: 'completed'
       })
       .eq('id', eventId);

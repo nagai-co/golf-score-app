@@ -15,8 +15,8 @@ export default function AuthenticatedLayout({
   const pathname = usePathname();
 
   // フッターナビゲーションを表示するパス
-  const showFooterPaths = ['/home', '/events', '/annual'];
-  // スコア入力画面ではフッターを非表示
+  const showFooterPaths = ['/events', '/annual', '/admin'];
+  // スコア入力画面・組選択画面ではフッターを非表示
   const isScoreInputPage = /\/events\/[^/]+\/score/.test(pathname);
   const shouldShowFooter = showFooterPaths.some(path => pathname === path || pathname.startsWith(path + '/')) && !isScoreInputPage;
 

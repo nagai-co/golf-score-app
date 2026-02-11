@@ -1,52 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
-import bcrypt from 'bcryptjs';
 
 export async function POST(req: NextRequest) {
   try {
-    const { name, password } = await req.json();
+    const { pin } = await req.json();
 
-    console.log('Login attempt:', { name, passwordLength: password?.length });
-
-    if (!name || !password) {
+    if (!pin) {
       return NextResponse.json(
-        { error: '名前とパスワードを入力してください' },
+        { error: 'PINを入力してください' },
         { status: 400 }
       );
     }
 
-    const { data: user, error } = await supabase
-      .from('users')
-      .select('*')
-      .eq('name', name)
-      .single();
+    const { data: settings, error } = await supabase
+      .from('app_settings')
+      .select('key, value')
+      .in('key', ['admin_pin', 'general_pin']);
 
-    console.log('Supabase query result:', { user: user?.name, error: error?.message });
-
-    if (error || !user) {
+    if (error || !settings) {
       return NextResponse.json(
-        { error: 'ユーザーが見つかりません', details: error?.message },
-        { status: 401 }
+        { error: '認証設定の取得に失敗しました' },
+        { status: 500 }
       );
     }
 
-    // 一時的にパスワードチェックをスキップ（開発環境用）
-    const valid = password === 'golf1234' || await bcrypt.compare(password, user.password_hash);
+    const adminPin = settings.find(s => s.key === 'admin_pin')?.value;
+    const generalPin = settings.find(s => s.key === 'general_pin')?.value;
 
-    if (!valid) {
-      return NextResponse.json(
-        { error: 'パスワードが正しくありません' },
-        { status: 401 }
-      );
+    if (pin === adminPin) {
+      return NextResponse.json({ role: 'admin' });
     }
 
-    return NextResponse.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        role: user.role,
-      },
-    });
+    if (pin === generalPin) {
+      return NextResponse.json({ role: 'player' });
+    }
+
+    return NextResponse.json(
+      { error: 'PINが正しくありません' },
+      { status: 401 }
+    );
   } catch {
     return NextResponse.json(
       { error: 'サーバーエラーが発生しました' },

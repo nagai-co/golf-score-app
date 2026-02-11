@@ -42,7 +42,7 @@ export default function PlayersPage() {
 
   useEffect(() => {
     if (user?.role !== 'admin') {
-      router.replace('/home');
+      router.replace('/admin');
       return;
     }
     fetchPlayers();

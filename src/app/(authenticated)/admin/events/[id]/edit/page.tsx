@@ -32,7 +32,7 @@ export default function EditEventPage() {
   // マスタデータ＋イベントデータ取得
   const fetchData = useCallback(async () => {
     const [membersRes, coursesRes, eventRes] = await Promise.all([
-      fetch('/api/admin/members'),
+      fetch(`/api/admin/players?year=${new Date().getFullYear()}`),
       fetch('/api/admin/courses'),
       fetch(`/api/events/${eventId}`),
     ]);
@@ -46,13 +46,13 @@ export default function EditEventPage() {
       setEventDate(ev.event_date);
       setCourseId(ev.courses?.id || '');
       setSelectedParticipants(
-        ev.event_participants?.map((p: { user_id: string }) => p.user_id) || []
+        ev.event_participants?.map((p: { player_id: string }) => p.player_id) || []
       );
       setGroups(
-        ev.event_groups?.map((g: { group_number: number; start_time: string; group_members: { user_id: string }[] }) => ({
+        ev.event_groups?.map((g: { group_number: number; start_time: string; group_members: { player_id: string }[] }) => ({
           group_number: g.group_number,
           start_time: g.start_time || '08:00',
-          members: g.group_members?.map((m: { user_id: string }) => m.user_id) || [],
+          members: g.group_members?.map((m: { player_id: string }) => m.player_id) || [],
         })) || []
       );
     }
@@ -62,7 +62,7 @@ export default function EditEventPage() {
 
   useEffect(() => {
     if (user?.role !== 'admin') {
-      router.replace('/home');
+      router.replace('/admin');
       return;
     }
     fetchData();

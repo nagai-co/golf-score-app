@@ -10,16 +10,16 @@ export async function GET(_req: NextRequest, { params }: RouteParams) {
   const { data: event, error } = await supabase
     .from('events')
     .select(`
-      id, name, event_date, status, score_edit_deadline,
+      id, name, event_date, status, score_edit_deadline, event_type, is_finalized, year,
       courses ( id, name,
         course_holes ( hole_number, par )
       ),
-      event_participants ( id, user_id,
-        users ( id, name )
+      event_participants ( id, player_id,
+        players ( id, name )
       ),
       event_groups ( id, group_number, start_time,
-        group_members ( id, user_id,
-          users ( id, name )
+        group_members ( id, player_id,
+          players ( id, name )
         )
       )
     `)
@@ -83,9 +83,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       await supabase.from('event_participants').delete().eq('event_id', id);
 
       if (participants.length > 0) {
-        const participantRecords = participants.map((userId: string) => ({
+        const participantRecords = participants.map((playerId: string) => ({
           event_id: id,
-          user_id: userId,
+          player_id: playerId,
         }));
         const { error: partError } = await supabase
           .from('event_participants')
@@ -127,9 +127,9 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
         }
 
         if (group.members && group.members.length > 0) {
-          const memberRecords = group.members.map((userId: string) => ({
+          const memberRecords = group.members.map((playerId: string) => ({
             group_id: groupData.id,
-            user_id: userId,
+            player_id: playerId,
           }));
           const { error: memberError } = await supabase
             .from('group_members')

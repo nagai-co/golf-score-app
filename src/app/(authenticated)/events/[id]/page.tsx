@@ -2,26 +2,26 @@
 
 import { useAuth } from '@/lib/auth-context';
 import { useRouter, useParams } from 'next/navigation';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
 
 type CourseHole = { hole_number: number; par: number };
 type Score = {
   id: string;
-  user_id: string;
+  player_id: string;
   hole_number: number;
   strokes: number;
   putts: number;
 };
 type Participant = {
   id: string;
-  user_id: string;
-  users: { id: string; name: string };
+  player_id: string;
+  players: { id: string; name: string };
 };
 type GroupMember = {
   id: string;
-  user_id: string;
-  users: { id: string; name: string };
+  player_id: string;
+  players: { id: string; name: string };
 };
 type EventGroup = {
   id: string;
@@ -58,7 +58,7 @@ type EventResult = {
   under_par_strokes: number;
 };
 
-type Tab = 'scores' | 'groups' | 'penalties' | 'results';
+type Tab = 'scores' | 'groups' | 'ranking';
 
 export default function EventDetailPage() {
   const { user } = useAuth();
@@ -106,20 +106,50 @@ export default function EventDetailPage() {
     const res = await fetch(`/api/events/${eventId}/finalize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ userId: user?.id })
+      body: JSON.stringify({})
     });
 
     if (res.ok) {
       alert('イベントを確定しました');
       fetchEvent();
       fetchResults();
-      setTab('results');
+      setTab('ranking');
     } else {
       const data = await res.json();
       alert(`確定に失敗しました: ${data.error}`);
     }
     setFinalizing(false);
   };
+
+  // ランキング計算（未確定時用：スコアデータからグロス/ネット順位を算出）
+  const liveRanking = useMemo(() => {
+    if (!event || !event.courses) return [];
+    const holes = event.courses.course_holes || [];
+    const totalHoles = holes.length;
+    const participants = event.event_participants || [];
+
+    const rankings = participants.map((p) => {
+      let gross = 0;
+      let holesPlayed = 0;
+      for (const hole of holes) {
+        const s = event.scores.find((sc) => sc.player_id === p.player_id && sc.hole_number === hole.hole_number);
+        if (s && s.strokes > 0) {
+          gross += s.strokes;
+          holesPlayed++;
+        }
+      }
+      return {
+        player_id: p.player_id,
+        name: p.players.name,
+        gross,
+        holesPlayed,
+      };
+    }).filter(r => r.holesPlayed > 0);
+
+    // グロスでソート
+    rankings.sort((a, b) => a.gross - b.gross);
+    return rankings;
+  }, [event]);
 
   if (loading) {
     return (
@@ -141,34 +171,14 @@ export default function EventDetailPage() {
   const outHoles = holes.filter((h) => h.hole_number <= 9);
   const inHoles = holes.filter((h) => h.hole_number > 9);
 
-  const getScore = (userId: string, holeNumber: number) =>
-    event.scores.find((s) => s.user_id === userId && s.hole_number === holeNumber);
+  const getScore = (playerId: string, holeNumber: number) =>
+    event.scores.find((s) => s.player_id === playerId && s.hole_number === holeNumber);
 
-  const playerTotal = (userId: string, holeRange: CourseHole[]) =>
+  const playerTotal = (playerId: string, holeRange: CourseHole[]) =>
     holeRange.reduce((sum, h) => {
-      const s = getScore(userId, h.hole_number);
+      const s = getScore(playerId, h.hole_number);
       return sum + (s?.strokes || 0);
     }, 0);
-
-  const playerPutts = (userId: string, holeRange: CourseHole[]) =>
-    holeRange.reduce((sum, h) => {
-      const s = getScore(userId, h.hole_number);
-      return sum + (s?.putts || 0);
-    }, 0);
-
-  // 罰金計算
-  const calcPenalty = (userId: string) => {
-    let penalty = 0;
-    for (const hole of holes) {
-      const s = getScore(userId, hole.hole_number);
-      if (!s) continue;
-      // 3パット以上: (パット数 - 2) × 100円
-      if (s.putts >= 3) penalty += (s.putts - 2) * 100;
-      // パー3で1オン失敗: ストローク数2以上の場合100円
-      if (hole.par === 3 && s.strokes >= 2) penalty += 100;
-    }
-    return penalty;
-  };
 
   const participants = event.event_participants || [];
 
@@ -209,7 +219,7 @@ export default function EventDetailPage() {
       {event.status !== 'completed' && (
         <div className="px-4 pt-3">
           <Link
-            href={`/events/${eventId}/score`}
+            href={`/events/${eventId}/score/select-group`}
             className="block w-full bg-[#166534] text-white text-center py-3 rounded-lg font-bold"
           >
             スコア入力
@@ -235,8 +245,7 @@ export default function EventDetailPage() {
         {([
           ['scores', 'スコア'],
           ['groups', '組み合わせ'],
-          ['penalties', '罰金'],
-          ...(event.is_finalized ? [['results', '結果']] : [])
+          ['ranking', 'ランキング'],
         ] as [Tab, string][]).map(([key, label]) => (
           <button
             key={key}
@@ -298,15 +307,15 @@ export default function EventDetailPage() {
                 </thead>
                 <tbody>
                   {participants.map((p) => {
-                    const outScore = playerTotal(p.user_id, outHoles);
-                    const inScore = playerTotal(p.user_id, inHoles);
+                    const outScore = playerTotal(p.player_id, outHoles);
+                    const inScore = playerTotal(p.player_id, inHoles);
                     return (
                       <tr key={p.id} className="border-t border-gray-100">
                         <td className="sticky left-0 bg-white px-2 py-1 font-medium whitespace-nowrap">
-                          {p.users.name}
+                          {p.players.name}
                         </td>
                         {outHoles.map((h) => {
-                          const s = getScore(p.user_id, h.hole_number);
+                          const s = getScore(p.player_id, h.hole_number);
                           const diff = s ? s.strokes - h.par : 0;
                           return (
                             <td
@@ -323,7 +332,7 @@ export default function EventDetailPage() {
                           {outScore || '-'}
                         </td>
                         {inHoles.map((h) => {
-                          const s = getScore(p.user_id, h.hole_number);
+                          const s = getScore(p.player_id, h.hole_number);
                           const diff = s ? s.strokes - h.par : 0;
                           return (
                             <td
@@ -369,7 +378,7 @@ export default function EventDetailPage() {
                         key={gm.id}
                         className="bg-green-50 text-green-800 px-3 py-1 rounded-full text-sm"
                       >
-                        {gm.users.name}
+                        {gm.players.name}
                       </span>
                     ))}
                   </div>
@@ -379,58 +388,11 @@ export default function EventDetailPage() {
           </div>
         )}
 
-        {/* 罰金タブ */}
-        {tab === 'penalties' && (
-          <div className="space-y-2">
-            {participants.length === 0 ? (
-              <p className="text-gray-500 text-sm">参加者がいません</p>
-            ) : (
-              <>
-                {participants.map((p) => {
-                  const penalty = calcPenalty(p.user_id);
-                  return (
-                    <div
-                      key={p.id}
-                      className="bg-white rounded-lg shadow p-4 flex items-center justify-between"
-                    >
-                      <span className="font-medium text-gray-800">{p.users.name}</span>
-                      <span className={`font-bold ${penalty > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                        {penalty > 0 ? `${penalty.toLocaleString()}円` : '0円'}
-                      </span>
-                    </div>
-                  );
-                })}
-                <div className="bg-gray-800 text-white rounded-lg p-4 flex items-center justify-between mt-3">
-                  <span className="font-bold">合計</span>
-                  <span className="font-bold text-lg">
-                    {participants
-                      .reduce((sum, p) => sum + calcPenalty(p.user_id), 0)
-                      .toLocaleString()}
-                    円
-                  </span>
-                </div>
-              </>
-            )}
-
-            {/* 罰金ルール説明 */}
-            {user && (
-              <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-3 text-xs text-yellow-800">
-                <p className="font-bold mb-1">罰金ルール</p>
-                <ul className="list-disc list-inside space-y-1">
-                  <li>3パット以上: (パット数 - 2) × 100円</li>
-                  <li>パー3で1オン失敗（ストローク数2以上）: 100円</li>
-                </ul>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* 結果タブ（イベント確定後のみ表示） */}
-        {tab === 'results' && event.is_finalized && (
-          <div className="space-y-2">
-            {results.length === 0 ? (
-              <p className="text-gray-500 text-sm">結果データがありません</p>
-            ) : (
+        {/* ランキングタブ */}
+        {tab === 'ranking' && (
+          <div className="space-y-4">
+            {/* 確定後: 公式結果 */}
+            {event.is_finalized && results.length > 0 ? (
               <>
                 <div className="bg-white rounded-lg shadow overflow-hidden">
                   <table className="w-full text-sm">
@@ -440,8 +402,8 @@ export default function EventDetailPage() {
                         <th className="px-3 py-2 text-left">名前</th>
                         <th className="px-3 py-2 text-center">グロス</th>
                         <th className="px-3 py-2 text-center">ネット</th>
-                        <th className="px-3 py-2 text-center">ポイント</th>
-                        <th className="px-3 py-2 text-center">ハンデ</th>
+                        <th className="px-3 py-2 text-center">Pt</th>
+                        <th className="px-3 py-2 text-center">HC</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -489,13 +451,49 @@ export default function EventDetailPage() {
                   </table>
                 </div>
 
-                {/* イベントタイプ表示 */}
                 <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-800">
                   <p className="font-bold mb-1">イベント情報</p>
                   <p>
                     種別: {event.event_type === 'major' ? 'メジャー大会' : event.event_type === 'final' ? '最終戦' : '通常大会'}
                   </p>
                 </div>
+              </>
+            ) : (
+              /* 未確定: ライブランキング（グロス順） */
+              <>
+                {liveRanking.length === 0 ? (
+                  <p className="text-gray-500 text-sm">スコアデータがありません</p>
+                ) : (
+                  <div className="bg-white rounded-lg shadow overflow-hidden">
+                    <div className="bg-gray-50 px-3 py-2 text-xs text-gray-500 font-medium">
+                      グロススコア順（暫定）
+                    </div>
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-100">
+                        <tr>
+                          <th className="px-3 py-2 text-center">#</th>
+                          <th className="px-3 py-2 text-left">名前</th>
+                          <th className="px-3 py-2 text-center">グロス</th>
+                          <th className="px-3 py-2 text-center">ホール数</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {liveRanking.map((r, idx) => (
+                          <tr key={r.player_id} className="border-t border-gray-100">
+                            <td className="px-3 py-3 text-center font-bold text-gray-500">
+                              {idx + 1}
+                            </td>
+                            <td className="px-3 py-3 font-medium">{r.name}</td>
+                            <td className="px-3 py-3 text-center font-bold">{r.gross}</td>
+                            <td className="px-3 py-3 text-center text-gray-500">
+                              {r.holesPlayed}H
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </>
             )}
           </div>
